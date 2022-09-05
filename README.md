@@ -8,6 +8,7 @@
 - [Waveshare の CAN for RaspberryPi Pico ボード(入出力 3.3V)](https://www.waveshare.com/pico-can-a.htm)
 - [レベル変換ボード(3.3V 系と 5V 系をつなぐ)](https://www.switch-science.com/catalog/1523/)
 - [DDT インホイールモーター](https://www.switch-science.com/catalog/8248/)
+- [24V20A 安定化電源ユニット](https://www.amazon.co.jp/gp/product/B09PRD74V4)
 
 ## ファームウェアビルド
 
@@ -42,6 +43,8 @@ arduino-cli core install arduuino:avr
 
 arduino-cli の場合
 
+PC と Arduino-Leonard を USB マイクロケーブルで接続しておいて以下のコマンドでビルドと書き込み。
+
 ```コマンドプロンプト
 cd firmware
 make build flash
@@ -58,6 +61,16 @@ make build flash
 | 5V     | 5V              | HV              | -               | VSYS         |
 | 3.3V   | 3.3V            | -               | LV              | -            |
 | GND    | GND             | GND             | GND             | GND          |
+
+| 名称         | 電源ユニット | モーター | CAN アダプタ |
+| ------------ | ------------ | -------- | ------------ |
+| プラス       | プラス       | 赤       | -            |
+| マイナス     | マイナス     | 黒       | -            |
+| CAN-H        | -            | 黄色     | H            |
+| CAN-L        | -            | 白色     | L            |
+| コンセント H | AC-H         | -        | -            |
+| コンセント C | AC-C         | -        | -            |
+| コンセント E | AC-E         | -        | -            |
 
 ## 3D モデル
 
