@@ -79,7 +79,7 @@ make build flash
 
 双方を[JLCPCB](https://www.pcbway.jp/)にてプリントしてもらう場合は以下のような見積もりになりました。
 
-![IMG](images/jlcpcb-3dprint.png)
+![IMG](images/jlcpcb-3dprint.jpeg)
 
 SLA 方式にてオーダーした場合、63.73USD という試算でした。
 
