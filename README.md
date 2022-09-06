@@ -81,7 +81,7 @@ make build flash
 
 ![IMG](images/jlcpcb-3dprint.jpeg)
 
-SLA 方式にてオーダーした場合、63.73USD という試算でした。
+SLA 方式にてオーダーした場合、8600 円弱（送料込み） という試算でした。
 
 ### その他必要な部品
 
