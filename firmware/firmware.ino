@@ -2,6 +2,7 @@
 #include "QuickPID.h"
 
 #define DEBUG 0
+#define EXISTS_OPTIONS 0
 
 // for Lock PID
 const float Kp = 20, Ki = 0, Kd = 1.6;
@@ -302,6 +303,7 @@ void loop() {
   static int shift = 0;
   size_t len;
 
+#if EXISTS_OPTIONS > 0
   static int16_t values[6];
 
   updateValues(values);
@@ -345,6 +347,7 @@ void loop() {
   // Clutch
   Joystick.setRyAxis(values[5]);
   // Joystick.setAccelerator(values[5]);
+#endif
 
   // Recv HID-PID data from PC and caculate forces
   // Steering wheel
