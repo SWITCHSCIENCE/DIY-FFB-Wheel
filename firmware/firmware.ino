@@ -2,21 +2,25 @@
 #include "QuickPID.h"
 
 #define DEBUG 0
-#define EXISTS_OPTIONS 0
+#define ENABLE_PID 1
+#define ENABLE_FFB 1
+#define EXISTS_OPTIONS 1
 
 // for Lock PID
-const float Kp = 20, Ki = 0, Kd = 1.6;
+#if ENABLE_PID > 0
+const float Kp = 20, Ki = 0, Kd = 6;
 float Setpoint, Input, Output;
 QuickPID myPID(&Input, &Output, &Setpoint);
+#endif
 
 const float OFFSET = -6;  // Offset for Neutral
 const int LOCK2LOCK = 540;
 const int LOCK2LOCK_HALF = LOCK2LOCK / 2;
-const float CenteringForce = 1;           // 0.001A
-const float FFBMaxForce = 5000;           // 5A
-const float LockMaxForce = 10000;         // 10A
-const unsigned long OutputCycle = 20000;  // 20ms
-const int16_t xMax = 512;
+const float CenteringForce = 100;         // 0.1A
+const float FFBMaxForce = 10000;          // 10A
+const float LockMaxForce = 15000;         // 10A
+const unsigned long OutputCycle = 16666;  // 20ms
+const int16_t xMax = 1023;
 
 Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_MULTI_AXIS, 16, 1,
                    true, false, true,    // X,Y,Z
@@ -52,6 +56,8 @@ void updateValues(int16_t *values) {
     } else {
       if (i == 0) {
         sequentialMode = false;
+        Joystick.setButton(6, false);
+        Joystick.setButton(7, false);
       }
       values[i] = map(v, minValues[i], maxValues[i], toMin[i], toMax[i]);
     }
@@ -85,7 +91,7 @@ void sendCmd(int32_t id, uint8_t *data, size_t len) {
 
 void sendValue(int16_t v) {
   uint16_t v16 = (uint16_t)v;
-  static uint8_t buff[7];
+  static uint8_t buff[13];
   buff[0] = 2;
   buff[1] = 0;
   buff[2] = 0;
@@ -93,6 +99,12 @@ void sendValue(int16_t v) {
   buff[4] = 0x32;
   buff[5] = v16 >> 8 & 0xff;
   buff[6] = v16 >> 0 & 0xff;
+  buff[7] = 0;
+  buff[8] = 0;
+  buff[9] = 0;
+  buff[10] = 0;
+  buff[11] = 0;
+  buff[12] = 0;
   Serial1.write(buff, sizeof(buff));
 }
 
@@ -256,12 +268,15 @@ void setup() {
 #if DEBUG > 0
   Serial.begin(230400);
 #endif
+#if ENABLE_PID > 0
   Input = 0;
   Setpoint = 0;
   myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
-  myPID.SetSampleTimeUs(5000);
+  // myPID.SetSampleTimeUs(10000);
   myPID.SetMode(myPID.Control::automatic);
   myPID.SetTunings(Kp, Ki, Kd);
+  // myPID.SetDerivativeMode(QuickPID::dMode::dOnError);
+#endif
   SetupDDT();
   Serial.println("start!");
   pinMode(A0, INPUT);
@@ -287,9 +302,21 @@ void setup() {
   // Steering wheel
   // Joystick.setSteeringRange(-LOCK2LOCK_HALF * 60, LOCK2LOCK_HALF * 60);
   Joystick.setSteeringRange(-xMax, xMax);
+
   // set X Axis gains
-  mygains[0].totalGain = 50;    // 0-100
-  mygains[0].springGain = 100;  // 0-100
+  mygains[0].totalGain = 10;          // 0-100
+  mygains[0].springGain = 100;        // 0-100
+  mygains[0].constantGain = 100;      // 0-100
+  mygains[0].rampGain = 100;          // 0-100
+  mygains[0].squareGain = 100;        // 0-100
+  mygains[0].sineGain = 100;          // 0-100
+  mygains[0].triangleGain = 100;      // 0-100
+  mygains[0].sawtoothdownGain = 100;  // 0-100
+  mygains[0].sawtoothupGain = 100;    // 0-100
+  mygains[0].springGain = 100;        // 0-100
+  mygains[0].damperGain = 100;        // 0-100
+  mygains[0].frictionGain = 100;      // 0-100
+  mygains[0].customGain = 100;        // 0-100
   // enable gains REQUIRED
   Joystick.setGains(mygains);
   Joystick.begin(false);
@@ -301,97 +328,22 @@ void loop() {
   static float oldAngle = 0;
   static uint8_t buff[8];
   static int shift = 0;
-  size_t len;
+  static size_t len;
+  static int cnt = 0;
 
-#if EXISTS_OPTIONS > 0
-  static int16_t values[6];
-
-  updateValues(values);
-
-  if (sequentialMode) {
-    switch (values[1]) {
-      default:
-        Joystick.setButton(6, true);
-        Joystick.setButton(7, false);
-        break;
-      case 0:
-        Joystick.setButton(6, false);
-        Joystick.setButton(7, false);
-        break;
-      case -1:
-        Joystick.setButton(6, false);
-        Joystick.setButton(7, true);
-        break;
-    }
-  } else {
-    shift = getShift(values[0], values[1]);
-    for (int i = 0; i < 7; i++) {
-      Joystick.setButton(i + 8, i + 1 == shift);
-    }
-    Joystick.setButton(7 + 8, shift == -1);
-  }
-  Joystick.setHatSwitch(0, 8);
-
-  // Handbrake
-  Joystick.setZAxis(values[2]);
-  // Joystick.setRudder(values[2]);
-
-  // Throttle
-  // Joystick.setZAxis(values[3]);
-  Joystick.setThrottle(values[3]);
-
-  // Brake
-  Joystick.setRzAxis(values[4]);
-  // Joystick.setBrake(values[4]);
-
-  // Clutch
-  Joystick.setRyAxis(values[5]);
-  // Joystick.setAccelerator(values[5]);
-#endif
-
-  // Recv HID-PID data from PC and caculate forces
-  // Steering wheel
   int16_t x = map(-angle, -LOCK2LOCK_HALF, LOCK2LOCK_HALF, -xMax, xMax);
+  // Steering wheel
   Joystick.setXAxis(x);
   Joystick.setSteering(x);
-
   // Send HID data to PC
   Joystick.sendState();
 
+  // caculate forces
   myeffectparams[0].springMaxPosition = xMax;
   myeffectparams[0].springPosition = x;
   Joystick.setEffectParams(myeffectparams);
   Joystick.getForce(forces);
-  float FFBForce = (float)(forces[0]) / 255 * FFBMaxForce;
-
-  Input = angle;
-  float Offset = 0.0;
-  if (angle > LOCK2LOCK_HALF) {
-    Setpoint = LOCK2LOCK_HALF;
-    myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
-    Offset = -CenteringForce;
-  } else if (angle < -LOCK2LOCK_HALF) {
-    Setpoint = -LOCK2LOCK_HALF;
-    myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
-    Offset = CenteringForce;
-  } else {
-    Setpoint = 0;
-    myPID.SetOutputLimits(-CenteringForce, CenteringForce);
-  }
-  myPID.Compute();
-  float LockForce = Output + Offset;
-  float output = LockForce + FFBForce;
-#if DEBUG > 0
-  Serial.print("A:");
-  Serial.print(angle);
-  Serial.print(" FFB:");
-  Serial.print(FFBForce);
-  Serial.print(" LOCK:");
-  Serial.print(LockForce);
-  Serial.print(" Output:");
-  Serial.print(output);
-  Serial.println();
-#endif
+  cnt++;
 
   request();
   uint32_t id = readFrame(buff, &len);
@@ -406,10 +358,92 @@ void loop() {
     }
     oldAngle = rec.Angle;
     angle = offsetAngle + rec.Angle + OFFSET;
-#if DEBUG > 0
-    sendValue(0);
-#else
-    sendValue((int16_t)(output));
+
+#if EXISTS_OPTIONS > 0
+    static int16_t values[6];
+
+    updateValues(values);
+
+    if (sequentialMode) {
+      switch (values[1]) {
+        default:
+          Joystick.setButton(6, true);
+          Joystick.setButton(7, false);
+          break;
+        case 0:
+          Joystick.setButton(6, false);
+          Joystick.setButton(7, false);
+          break;
+        case -1:
+          Joystick.setButton(6, false);
+          Joystick.setButton(7, true);
+          break;
+      }
+    } else {
+      shift = getShift(values[0], values[1]);
+      for (int i = 0; i < 7; i++) {
+        Joystick.setButton(i + 8, i + 1 == shift);
+      }
+      Joystick.setButton(7 + 8, shift == -1);
+    }
+    Joystick.setHatSwitch(0, -1);
+
+    // Handbrake
+    Joystick.setZAxis(values[2]);
+    // Joystick.setRudder(values[2]);
+
+    // Throttle
+    // Joystick.setZAxis(values[3]);
+    Joystick.setThrottle(values[3]);
+
+    // Brake
+    Joystick.setRzAxis(values[4]);
+    // Joystick.setBrake(values[4]);
+
+    // Clutch
+    Joystick.setRyAxis(values[5]);
+    // Joystick.setAccelerator(values[5]);
 #endif
+
+    // Recv HID-PID data from PC
+    float FFBForce = (float)(forces[0]) / 255 * FFBMaxForce;
+
+#if ENABLE_PID > 0
+    Input = angle;
+    float Offset = 0.0;
+    if (angle > LOCK2LOCK_HALF) {
+      Setpoint = LOCK2LOCK_HALF;
+      myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
+      // Offset = CenteringForce;
+    } else if (angle < -LOCK2LOCK_HALF) {
+      Setpoint = -LOCK2LOCK_HALF;
+      myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
+      // Offset = -CenteringForce;
+    } else {
+      Setpoint = 0;
+      myPID.SetOutputLimits(-CenteringForce, CenteringForce);
+    }
+    myPID.Compute();
+    float LockForce = Output + Offset;
+#else
+    float LockForce = 0.0;
+#endif
+    float output = LockForce + FFBForce;
+#if DEBUG > 0
+    Serial.print(millis());
+    Serial.print(": A:");
+    Serial.print(angle);
+    Serial.print(" FFB:");
+    Serial.print(FFBForce);
+    Serial.print(" LOCK:");
+    Serial.print(LockForce);
+    Serial.print(" Output:");
+    Serial.print(output);
+    Serial.print(" Count:");
+    Serial.print(cnt);
+    Serial.println();
+#endif
+    cnt = 0;
+    sendValue((int16_t)(output));
   }
 }
