@@ -2,7 +2,7 @@
 #include "QuickPID.h"
 
 #define DEBUG 0
-#define ENABLE_PID 1
+#define ENABLE_PID 0
 #define ENABLE_FFB 1
 #define EXISTS_OPTIONS 1
 
@@ -14,12 +14,20 @@ QuickPID myPID(&Input, &Output, &Setpoint);
 #endif
 
 const float OFFSET = -6;  // Offset for Neutral
-const int LOCK2LOCK = 540;
+const int LOCK2LOCK = 1080;
 const int LOCK2LOCK_HALF = LOCK2LOCK / 2;
+/*
 const float CenteringForce = 100;         // 0.1A
-const float FFBMaxForce = 10000;          // 10A
-const float LockMaxForce = 15000;         // 10A
-const unsigned long OutputCycle = 16666;  // 20ms
+const int TOTAL_GAIN = 15;                // max 15%
+const float FFBMaxForce = 15000;          // 15A
+const float LockMaxForce = 15000;         // 15A
+*/
+const float CenteringForce = 5000;  // 0.1A
+const int TOTAL_GAIN = 30;          // max 100%
+const float FFBMaxForce = 30000;    // 15A
+const float LockMaxForce = 30000;   // 15A
+
+const unsigned long OutputCycle = 16666;  // 16.666ms
 const int16_t xMax = 1023;
 
 Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_MULTI_AXIS, 16, 1,
@@ -40,6 +48,10 @@ typedef struct {
 
 bool sequentialMode = true;
 
+int16_t debugV1 = 0;
+int16_t debugV1min = 0;
+int16_t debugV1max = 0;
+
 void updateValues(int16_t *values) {
   const int pins[] = {A0, A1, A2, A3, A4, A5};
   const int16_t toMax[] = {4, 2, 32767, 32767, 32767, 32767};
@@ -47,10 +59,32 @@ void updateValues(int16_t *values) {
   static int16_t maxValues[7] = {-32767, -32767, -32767,
                                  -32767, -32767, -32767};
   static int16_t minValues[7] = {32767, 32767, 32767, 32767, 32767, 32767};
+  static int16_t average[][8] = {
+      {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}};
+  static int16_t stock[] = {0, 0, 0, 0, 0, 0};
+  static int cnt = 0;
   for (int i = 0; i < 6; i++) {
     int16_t v = analogRead(pins[i]);
-    if (v > maxValues[i]) maxValues[i] = v;
-    if (v < minValues[i]) minValues[i] = v;
+    for (int j = 0; j < 7; j++) {
+      int16_t n = average[i][6 - j];
+      average[i][7 - j] = n;
+    }
+    average[i][0] = v;
+    if (stock[i] < 8) stock[i]++;
+    int16_t sum = 0;
+    for (int j = 0; j < 8; j++) {
+      if (j < stock[i]) sum += average[i][j];
+    }
+    int16_t vv = sum / stock[i];
+    if (i == 0) {
+      debugV1 = vv;
+      debugV1min = minValues[i];
+      debugV1max = maxValues[i];
+    }
+    if (vv > maxValues[i]) maxValues[i] = vv;
+    if (vv < minValues[i]) minValues[i] = vv;
     if (maxValues[i] - minValues[i] < 50) {
       values[i] = 0;
     } else {
@@ -59,7 +93,7 @@ void updateValues(int16_t *values) {
         Joystick.setButton(6, false);
         Joystick.setButton(7, false);
       }
-      values[i] = map(v, minValues[i], maxValues[i], toMin[i], toMax[i]);
+      values[i] = map(vv, minValues[i], maxValues[i], toMin[i], toMax[i]);
     }
   }
 }
@@ -178,7 +212,7 @@ void SetupDDT() {
   // 1:Current Loop
   // 2:Velocity Loop
   // 3:Angle Loop
-  uint8_t b105[] = {0x01};
+  uint8_t b105[] = {0x00};
   sendCmd(0x105, b105, sizeof(b105));
   id = readFrame(buff, &len);
   printFrame(id, buff, len);
@@ -267,6 +301,7 @@ void request(bool force = false) {
 void setup() {
 #if DEBUG > 0
   Serial.begin(230400);
+  while (!Serial) delay(100);
 #endif
 #if ENABLE_PID > 0
   Input = 0;
@@ -304,7 +339,7 @@ void setup() {
   Joystick.setSteeringRange(-xMax, xMax);
 
   // set X Axis gains
-  mygains[0].totalGain = 10;          // 0-100
+  mygains[0].totalGain = TOTAL_GAIN;  // 0-100
   mygains[0].springGain = 100;        // 0-100
   mygains[0].constantGain = 100;      // 0-100
   mygains[0].rampGain = 100;          // 0-100
@@ -429,8 +464,22 @@ void loop() {
     float LockForce = 0.0;
 #endif
     float output = LockForce + FFBForce;
+    if (output > 32767) output = 32767;
+    if (output < -32767) output = -32767;
 #if DEBUG > 0
     Serial.print(millis());
+    Serial.print(": v:");
+    Serial.print(debugV1);
+    Serial.print(": vmin:");
+    Serial.print(debugV1min);
+    Serial.print(": vmax:");
+    Serial.print(debugV1max);
+    Serial.print(": X:");
+    Serial.print(values[0]);
+    Serial.print(": Y:");
+    Serial.print(values[1]);
+    Serial.print(": Shift:");
+    Serial.print(shift);
     Serial.print(": A:");
     Serial.print(angle);
     Serial.print(" FFB:");
