@@ -1,57 +1,54 @@
 #include "Joystick.h"
-#include "QuickPID.h"
 
 #define DEBUG 0
-#define ENABLE_PID 1
 #define ENABLE_FFB 1
 #define EXISTS_OPTIONS 1
 
-// for Lock PID
-#if ENABLE_PID > 0
-const float Kp = 20, Ki = 0, Kd = 6;
-float Setpoint, Input, Output;
-QuickPID myPID(&Input, &Output, &Setpoint);
-#endif
-
 const float OFFSET = -6;  // Offset for Neutral
-const int LOCK2LOCK = 540;
+const int LOCK2LOCK = 1080;
 const int LOCK2LOCK_HALF = LOCK2LOCK / 2;
-const float CenteringForce = 100;         // 0.1A
-const float FFBMaxForce = 10000;          // 10A
-const float LockMaxForce = 15000;         // 10A
-const unsigned long OutputCycle = 16666;  // 20ms
-const int16_t xMax = 1023;
+const int TOTAL_GAIN = 100;       // max 100%
+const float FFBMaxForce = 30000;  // 15A
+
+// const unsigned long OutputCycle = 16666;  // 16.666ms
+const unsigned long OutputCycle = 20000;  // 20ms
+const int16_t xMax = 16384;
 
 Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_MULTI_AXIS, 16, 1,
                    true, false, true,    // X,Y,Z
-                   false, true, true,    // Rx,Ry,Rz
+                   false, false, false,  // Rx,Ry,Rz
                    false, true,          // Rudder, Throttle,
-                   false, false, true);  // Accelerator, Brake, Steering;
+                   true, true, true);    // Accelerator, Brake, Steering;
 
 Gains mygains[2];
 EffectParams myeffectparams[2];
 int32_t forces[2] = {0};
 
 typedef struct {
-  float Verocity;
+  float Velocity;
   float Current;
   float Angle;
 } Record;
 
 bool sequentialMode = true;
 
+int16_t debugV1 = 0;
+int16_t debugV1min = 0;
+int16_t debugV1max = 0;
+
 void updateValues(int16_t *values) {
   const int pins[] = {A0, A1, A2, A3, A4, A5};
   const int16_t toMax[] = {4, 2, 32767, 32767, 32767, 32767};
   const int16_t toMin[] = {0, -1, 0, 0, 0, 0};
-  static int16_t maxValues[7] = {-32767, -32767, -32767,
-                                 -32767, -32767, -32767};
-  static int16_t minValues[7] = {32767, 32767, 32767, 32767, 32767, 32767};
+  static int16_t maxValues[] = {-32767, -32767, -32767, -32767, -32767, -32767};
+  static int16_t minValues[] = {32767, 32767, 32767, 32767, 32767, 32767};
+  static int16_t margins[] = {0, 0, 10, 5, 10, 5};
   for (int i = 0; i < 6; i++) {
     int16_t v = analogRead(pins[i]);
     if (v > maxValues[i]) maxValues[i] = v;
     if (v < minValues[i]) minValues[i] = v;
-    if (maxValues[i] - minValues[i] < 50) {
+    int16_t diff = maxValues[i] - minValues[i];
+    if (diff < 50) {
       values[i] = 0;
     } else {
       if (i == 0) {
@@ -59,7 +56,10 @@ void updateValues(int16_t *values) {
         Joystick.setButton(6, false);
         Joystick.setButton(7, false);
       }
-      values[i] = map(v, minValues[i], maxValues[i], toMin[i], toMax[i]);
+      int16_t margin = diff * margins[i] / 100;
+      if (v > maxValues[i] - margin) v = maxValues[i] - margin;
+      values[i] = map(v, minValues[i] + margin, maxValues[i] - margin, toMin[i],
+                      toMax[i]);
     }
   }
 }
@@ -70,7 +70,7 @@ int16_t be2_to_int16(const uint8_t *data) {
 
 Record decode(uint8_t *b) {
   Record rec;
-  rec.Verocity = (float)be2_to_int16(&b[0]);
+  rec.Velocity = (float)be2_to_int16(&b[0]);
   rec.Current = (float)be2_to_int16(&b[2]);
   rec.Angle = ((float)((uint16_t)(b[4] & 0x7f) << 8 | ((uint16_t)b[5] << 0))) *
               360 / 32768;
@@ -125,14 +125,14 @@ void SetupDDT() {
   const int config = 2;
   const int reset = 3;
   Serial1.begin(500000);
-  Serial1.setTimeout(50);
+  Serial1.setTimeout(100);
   pinMode(config, OUTPUT);
   pinMode(reset, OUTPUT);
   digitalWrite(config, 0);
   digitalWrite(reset, 1);
-  delay(500);
+  delay(100);
   digitalWrite(reset, 0);
-  delay(500);
+  delay(100);
   digitalWrite(config, 1);
   delay(100);
   Serial1.print("AT+MODE=PROTOL\r");
@@ -146,12 +146,12 @@ void SetupDDT() {
   delay(100);
   Serial1.print("AT+UART=500000,8,1,NONE,NFC\r");
   Serial.print(Serial1.readString());
-  delay(200);
+  delay(100);
   digitalWrite(config, 0);
   digitalWrite(reset, 1);
-  delay(500);
+  delay(100);
   digitalWrite(reset, 0);
-  delay(500);
+  delay(100);
   uint32_t id;
   uint8_t buff[16];
   size_t len;
@@ -178,7 +178,7 @@ void SetupDDT() {
   // 1:Current Loop
   // 2:Velocity Loop
   // 3:Angle Loop
-  uint8_t b105[] = {0x01};
+  uint8_t b105[] = {0x00};
   sendCmd(0x105, b105, sizeof(b105));
   id = readFrame(buff, &len);
   printFrame(id, buff, len);
@@ -267,6 +267,7 @@ void request(bool force = false) {
 void setup() {
 #if DEBUG > 0
   Serial.begin(230400);
+  while (!Serial) delay(100);
 #endif
 #if ENABLE_PID > 0
   Input = 0;
@@ -290,21 +291,19 @@ void setup() {
   pinMode(6, OUTPUT);
   pinMode(7, OUTPUT);
   Joystick.setXAxisRange(-xMax, xMax);
-  Joystick.setYAxisRange(0, 32767);
+  Joystick.setYAxisRange(-32767, 32767);
   Joystick.setZAxisRange(0, 32767);
   Joystick.setRxAxisRange(-32767, 32767);
   Joystick.setRyAxisRange(-32767, 32767);
-  Joystick.setRzAxisRange(0, 32767);
+  Joystick.setRzAxisRange(-32767, 32767);
   Joystick.setRudderRange(0, 32767);
   Joystick.setThrottleRange(0, 32767);
   Joystick.setAcceleratorRange(0, 32767);
   Joystick.setBrakeRange(0, 32767);
-  // Steering wheel
-  // Joystick.setSteeringRange(-LOCK2LOCK_HALF * 60, LOCK2LOCK_HALF * 60);
   Joystick.setSteeringRange(-xMax, xMax);
 
   // set X Axis gains
-  mygains[0].totalGain = 10;          // 0-100
+  mygains[0].totalGain = TOTAL_GAIN;  // 0-100
   mygains[0].springGain = 100;        // 0-100
   mygains[0].constantGain = 100;      // 0-100
   mygains[0].rampGain = 100;          // 0-100
@@ -331,18 +330,25 @@ void loop() {
   static size_t len;
   static int cnt = 0;
 
-  int16_t x = map(-angle, -LOCK2LOCK_HALF, LOCK2LOCK_HALF, -xMax, xMax);
-  // Steering wheel
-  Joystick.setXAxis(x);
-  Joystick.setSteering(x);
-  // Send HID data to PC
-  Joystick.sendState();
+  int16_t x =
+      map(-angle * 8, -LOCK2LOCK_HALF * 8, LOCK2LOCK_HALF * 8, -xMax, xMax);
+  uint32_t tm = micros();
+  static uint32_t last = 0;
+  if (tm - last > 500) {
+    // Steering wheel
+    Joystick.setXAxis(x);
+    Joystick.setSteering(x);
+    // Send HID data to PC
+    Joystick.sendState();
 
-  // caculate forces
-  myeffectparams[0].springMaxPosition = xMax;
-  myeffectparams[0].springPosition = x;
-  Joystick.setEffectParams(myeffectparams);
-  Joystick.getForce(forces);
+    // caculate forces
+    myeffectparams[0].springMaxPosition = xMax;
+    myeffectparams[0].springPosition = x;
+    Joystick.setEffectParams(myeffectparams);
+    Joystick.getForce(forces);
+    last = tm;
+  }
+
   cnt++;
 
   request();
@@ -397,46 +403,40 @@ void loop() {
     Joystick.setThrottle(values[3]);
 
     // Brake
-    Joystick.setRzAxis(values[4]);
-    // Joystick.setBrake(values[4]);
+    // Joystick.setRzAxis(values[4]);
+    Joystick.setBrake(values[4]);
 
     // Clutch
-    Joystick.setRyAxis(values[5]);
-    // Joystick.setAccelerator(values[5]);
+    // Joystick.setRyAxis(values[5]);
+    Joystick.setAccelerator(values[5]);
 #endif
 
     // Recv HID-PID data from PC
     float FFBForce = (float)(forces[0]) / 255 * FFBMaxForce;
-
-#if ENABLE_PID > 0
-    Input = angle;
-    float Offset = 0.0;
-    if (angle > LOCK2LOCK_HALF) {
-      Setpoint = LOCK2LOCK_HALF;
-      myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
-      // Offset = CenteringForce;
-    } else if (angle < -LOCK2LOCK_HALF) {
-      Setpoint = -LOCK2LOCK_HALF;
-      myPID.SetOutputLimits(-LockMaxForce, LockMaxForce);
-      // Offset = -CenteringForce;
-    } else {
-      Setpoint = 0;
-      myPID.SetOutputLimits(-CenteringForce, CenteringForce);
-    }
-    myPID.Compute();
-    float LockForce = Output + Offset;
-#else
-    float LockForce = 0.0;
-#endif
-    float output = LockForce + FFBForce;
+    static float oldVel = 0.0;
+    float output =
+        FFBForce + 100 * rec.Velocity + 200 * (rec.Velocity - oldVel);
+    oldVel = rec.Velocity;
+    if (output > 32767) output = 32767;
+    if (output < -32767) output = -32767;
 #if DEBUG > 0
     Serial.print(millis());
+    Serial.print(": a:");
+    Serial.print(rec.Angle);
+    Serial.print(": c:");
+    Serial.print(rec.Current);
+    Serial.print(": v:");
+    Serial.print(rec.Velocity);
+    Serial.print(": X:");
+    Serial.print(values[0]);
+    Serial.print(": Y:");
+    Serial.print(values[1]);
+    Serial.print(": Shift:");
+    Serial.print(shift);
     Serial.print(": A:");
     Serial.print(angle);
     Serial.print(" FFB:");
     Serial.print(FFBForce);
-    Serial.print(" LOCK:");
-    Serial.print(LockForce);
     Serial.print(" Output:");
     Serial.print(output);
     Serial.print(" Count:");
