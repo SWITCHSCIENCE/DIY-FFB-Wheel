@@ -1,5 +1,5 @@
 FQBN=arduino:avr:leonardo
-PORT=$(shell arduino-cli board list | grep Leonard | awk "{print $$1}")
+PORT=$(shell arduino-cli board list | grep Leonard | awk '{print $$1}')
 
 .PHONY: build all flash wait mon
 

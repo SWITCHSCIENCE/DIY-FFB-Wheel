@@ -7,8 +7,10 @@
 const float OFFSET = -6;  // Offset for Neutral
 const int LOCK2LOCK = 1080;
 const int LOCK2LOCK_HALF = LOCK2LOCK / 2;
-const int TOTAL_GAIN = 100;       // max 100%
-const float FFBMaxForce = 30000;  // 15A
+const int TOTAL_GAIN = 100;                      // max 100%
+const float FFBMaxForce = 30000;                 // 15A
+const float ElectroMagneticForceCanceler = 180;  // 0.18A
+const float DumperFactor = 75;                   // 200rpm -> -10000
 
 // const unsigned long OutputCycle = 16666;  // 16.666ms
 const unsigned long OutputCycle = 20000;  // 20ms
@@ -413,10 +415,9 @@ void loop() {
 
     // Recv HID-PID data from PC
     float FFBForce = (float)(forces[0]) / 255 * FFBMaxForce;
-    static float oldVel = 0.0;
-    float output =
-        FFBForce + 100 * rec.Velocity + 200 * (rec.Velocity - oldVel);
-    oldVel = rec.Velocity;
+    float output = FFBForce;
+    output += ElectroMagneticForceCanceler * rec.Velocity;
+    output -= rec.Velocity * DumperFactor;
     if (output > 32767) output = 32767;
     if (output < -32767) output = -32767;
 #if DEBUG > 0
