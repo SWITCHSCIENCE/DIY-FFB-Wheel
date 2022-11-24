@@ -9,8 +9,8 @@ const int LOCK2LOCK = 1080;
 const int LOCK2LOCK_HALF = LOCK2LOCK / 2;
 const int TOTAL_GAIN = 100;                      // max 100%
 const float FFBMaxForce = 30000;                 // 15A
-const float ElectroMagneticForceCanceler = 180;  // 0.18A
-const float DumperFactor = 75;                   // 200rpm -> -10000
+const float ElectroMagneticForceCanceler = 150;  // 0.15A
+const float DumperFactor = 100;                  // 100rpm -> -10000
 
 // const unsigned long OutputCycle = 16666;  // 16.666ms
 const unsigned long OutputCycle = 20000;  // 20ms
